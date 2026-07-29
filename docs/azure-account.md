@@ -11,30 +11,31 @@
 
 2. [Azure 계정 만들기](https://azure.microsoft.com/ko-kr/pricing/purchase-options/azure-account) 웹페이지에 접속합니다.
 
-   ![애저 계정 만드는 웹페이지](../assets/azure-account-0.png)
+   ![애저 계정 만드는 웹페이지](./images/azure-account-0.png)
 
 3. 적합한 Azure 계정을 선택해 등록 버튼을 누릅니다.
 
-   ![계정 종류 선택](../assets/azure-account-1.png)
-   - 종량제 요금: 기존 Azure 계정이 있을 경우 선택
-     - ![종량제 요금](../assets/azure-account-2.png)
 
-   - Azure 무료 계정: Azure 계정을 처음 만들 경우 선택
-     - ![무료 계정](../assets/azure-account-3.png)
+   ![계정 종류 선택](./images/azure-account-1.png)
+    - 종량제 요금: 기존 Azure 계정이 있을 경우 선택
+    - ![종량제 요금](./images/azure-account-2.png)
 
-   - 등록 확인 프로세스 중 일시적으로 카드에 USD$1 승인이 있을 수 있으며, 이는 확인 후 취소됩니다.
+    - Azure 무료 계정: Azure 계정을 처음 만들 경우 선택
+    - ![무료 계정](./images/azure-account-3.png)
+
+    - 등록 확인 프로세스 중 일시적으로 카드에 USD$1 승인이 있을 수 있으며, 이는 확인 후 취소됩니다.
 
 4. (Azure 무료 계정 기준) 필요한 정보와 결제 카드를 입력해 계정을 등록합니다.
 
-   ![Azure 무료 계정 정보 입력](../assets/azure-account-4.png)
+   ![Azure 무료 계정 정보 입력](./images/azure-account-4.png)
 
 5. [Azure Portal](https://portal.azure.com)에 접속합니다.
 
 6. Azure 무료 계정을 선택했을 경우, 아래 화면처럼 첫 화면에서 남은 크레딧이 보이는지 확인합니다.
 
-   ![구독 확인 이미지](../assets/azure-account-5.png)
+   ![구독 확인 이미지](./images/azure-account-5.png)
 
-   - 종량제 요금을 선택했을 경우 "구독"을 생성하여 결제 연결 후 사용할 수 있습니다.
+    - 종량제 요금을 선택했을 경우 "구독"을 생성하여 결제 연결 후 사용할 수 있습니다.
 
 7. 행사 전 Azure 구독 활성화를 한 번 더 확인해 주세요.
 
