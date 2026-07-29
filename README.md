@@ -13,8 +13,10 @@
 
 - 도전 과제: **추후 안내**
 - 제한 시간: 6시간
-- 사용 도구:
-  - [VS Code](https://code.visualstudio.com/download) + [GitHub Copilot](https://docs.github.com/copilot/get-started/what-is-github-copilot), [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) 또는 [GitHub Copilot app](https://docs.github.com/copilot/how-tos/github-copilot-app)
+- 사용 도구: 아래 나열한 도구들만 사용하세요. 타사의 AI 코딩 도구는 허용하지 않습니다.
+  - [VS Code](https://code.visualstudio.com/download) + [GitHub Copilot](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
+  - [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli)
+  - [GitHub Copilot app](https://docs.github.com/copilot/how-tos/github-copilot-app)
 - 기술 스택: 웹 앱
 - 사용 언어: 자유 선택
 - 배포 플랫폼: Azure 클라우드
@@ -34,14 +36,14 @@
 
 ## 대회 전 사전 준비 사항
 
-Discussions 보드의 [행사 참가를 위해 꼭 알고 있어야 할 내용입니다](https://github.com/matdaaiga-kr/matdathon-2026/discussions/4) 포스트를 참고하세요.
+Discussions 보드의 [행사 참가를 위해 꼭 알고 있어야 할 내용입니다](https://github.com/matdaaiga-kr/matdathon-2026/discussions/8) 포스트를 참고하세요.
 
-- [**내 GitHub 계정은 입코딩 대회에서 쓸 수 있을까?**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/3)
-- [**Azure 계정 및 구독 생성 방법**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/2)
+- [**내 GitHub 계정은 입코딩 대회에서 쓸 수 있을까?**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/7)
+- [**Azure 무료 계정 및 구독 생성 방법**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/2)
 
 ## 대회 규칙
 
-**추후 안내**
+- [맞다톤 규칙](./policies/policy-rules.md)
 
 ## 심사 항목
 
