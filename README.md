@@ -38,7 +38,7 @@
 
 Discussions 보드의 [행사 참가를 위해 꼭 알고 있어야 할 내용입니다](https://github.com/matdaaiga-kr/matdathon-2026/discussions/8) 포스트를 참고하세요.
 
-- [**내 GitHub 계정은 입코딩 대회에서 쓸 수 있을까?**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/7)
+- [**내 GitHub 계정은 맞다톤에서 쓸 수 있을까?**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/7)
 - [**Azure 무료 계정 및 구독 생성 방법**](https://github.com/matdaaiga-kr/matdathon-2026/discussions/2)
 
 ## 대회 규칙
