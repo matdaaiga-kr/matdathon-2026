@@ -26,7 +26,7 @@
 > [!IMPORTANT]
 > 한 번 팀을 구성하면 팀장 또는 팀원을 교체할 수 없습니다. 신중하게 팀을 만드세요.
 
-팀은 1인 단독으로 만들 수도 있고, 최대 4인까지 팀을 구성할 수 있습니다. 행사 전 미리 팀을 구성해 와도 좋고, 만약 현장에서 즉석으로 팀을 구성하고 싶다면 [Discussion 보드](https://github.com/matdaaiga-kr/matdathon-2026/discussions)의 [02 팀 빌딩](https://github.com/matdaaiga-kr/matdathon-2026/discussions/categories/02-%ED%8C%80-%EB%B9%8C%EB%94%A9) 카테고리를 이용하세요.
+팀은 개인으로 만들 수도 있고, 최대 4인까지 팀을 구성할 수 있습니다. 행사 전 미리 팀을 구성해 와도 좋고, 만약 현장에서 즉석으로 팀을 구성하고 싶다면 [Discussion 보드](https://github.com/matdaaiga-kr/matdathon-2026/discussions)의 [02 팀 빌딩](https://github.com/matdaaiga-kr/matdathon-2026/discussions/categories/02-%ED%8C%80-%EB%B9%8C%EB%94%A9) 카테고리를 이용하세요.
 
 팀 등록하기 👉 **추후 안내**
 
