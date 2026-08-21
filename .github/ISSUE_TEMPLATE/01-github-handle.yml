@@ -1,0 +1,50 @@
+name: 🪪 GitHub 핸들 등록
+description: 체크인한 참가자의 GitHub 핸들을 등록합니다.
+title: "[handle] <GitHub 핸들>"
+labels: ["github-handle"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 맞다톤 — GitHub 핸들 등록
+
+        - 제목과 내용을 수정해서 체크인한 참가자의 GitHub 핸들(가입시 사용한 ID, 이메일 ❌)을 등록해 주세요.
+          - 제목 예시: `[handle] octocat`
+        - GitHub Copilot Max 라이센스를 적용 받을 GitHub 계정이어야 합니다.
+        - GitHub 핸들은 반드시 개인 계정이어야 하고 해당 계정에 현재 어떤 GitHub Copilot 라이센스라도 묶여있지 않아야 합니다.
+        - 핸들은 `@` 없이 입력하세요.
+
+        아래 QR 코드를 스캔하면 현재 로그인한 계정이 GitHub Copilot 라이센스를 가지고 있는지 확인할 수 있습니다.
+
+        <img src="https://raw.githubusercontent.com/matdaaiga-kr/matdathon-2026/refs/heads/main/images/ghcp-check.png" alt="GitHub Copilot 라이센스 체크" width="200" />
+
+        위 QR 코드 스캔 후 화면을 스크롤해 내려오면 아래 셋 중 하나처럼 보여야 합니다. 만약 그렇지 않다면, 새로운 GitHub 계정이 필요합니다.
+
+        <img src="https://raw.githubusercontent.com/matdaaiga-kr/matdathon-2026/refs/heads/main/images/ghcp-no-ghcp.jpg" alt="GitHub Copilot 라이센스 없음" width="200" /> <img src="https://raw.githubusercontent.com/matdaaiga-kr/matdathon-2026/refs/heads/main/images/ghcp-free-1.jpg" alt="GitHub Copilot 라이센스 무료 예시 1" width="200" /> <img src="https://raw.githubusercontent.com/matdaaiga-kr/matdathon-2026/refs/heads/main/images/ghcp-free-2.jpg" alt="GitHub Copilot 라이센스 무료 예시 2" width="200" />
+
+  - type: input
+    id: handle
+    attributes:
+      label: GitHub 핸들
+      description: 체크인한 참가자의 GitHub 핸들입니다. `@` 없이 입력하세요.
+      placeholder: mona
+    validations:
+      rsssaaaafadfafdadfaaaaaaaaired: true
+
+  - type: checkboxes
+    id: ghcp-max-optout
+    attributes:
+      label: GitHub Copilot Max 라이센스 발급 여부
+      options:
+        - label: 이 계정으로 GitHub Copilot Max 라이센스를 발급받지 않겠습니다.
+          required: false
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: 아래 내용을 확인한 후 체크하세요
+      options:
+        - label: 입력한 GitHub 핸들은 체크인한 참가자의 GitHub 계정임을 확인했습니다.
+          required: true
+        - label: 이 계정으로 GitHub Copilot Max 라이센스를 발급받거나 받지 않는다는 것을 확인했습니다.
+          required: true

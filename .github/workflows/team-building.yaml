@@ -1,0 +1,389 @@
+name: Team Building
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  register:
+    # Only run for issues that carry the team-building label (set by the issue form).
+    if: contains(github.event.issue.labels.*.name, 'team-building')
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.event.repository.name }}
+      ISSUE: ${{ github.event.issue.number }}
+      AUTHOR: ${{ github.event.issue.user.login }}
+      BODY: ${{ github.event.issue.body }}
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # # ----------------------------------------------------------------------
+      # # 0. Reject overdue submissions. The deadline lives in the repo-level
+      # #    Actions variable `DUE_TEAM_BUILDING` (ISO-8601 with offset, e.g.
+      # #    `2026-06-20T13:00:00.000+09:00`). Compared against the issue's
+      # #    `created_at` so re-runs share the same verdict.
+      # # ----------------------------------------------------------------------
+      # - name: Check submission is on time
+      #   env:
+      #     DUE: ${{ vars.DUE_TEAM_BUILDING }}
+      #     CREATED_AT: ${{ github.event.issue.created_at }}
+      #   run: |
+      #     status=$(python3 - <<'PY'
+      #     import os, sys
+      #     from datetime import datetime
+
+      #     due_raw = os.environ.get("DUE", "").strip()
+      #     created_raw = os.environ.get("CREATED_AT", "").strip()
+
+      #     if not due_raw:
+      #         # No due date configured → don't block.
+      #         print("ok")
+      #         sys.exit(0)
+
+      #     def parse(ts: str):
+      #         # GitHub's created_at uses trailing Z; fromisoformat needs +00:00 on <3.11.
+      #         if ts.endswith("Z"):
+      #             ts = ts[:-1] + "+00:00"
+      #         return datetime.fromisoformat(ts)
+
+      #     print("overdue" if parse(created_raw) > parse(due_raw) else "ok")
+      #     PY
+      #     )
+
+      #     echo "Status: $status (due=$DUE, created=$CREATED_AT)"
+
+      #     if [ "$status" = "overdue" ]; then
+      #         gh issue comment "$ISSUE" --repo "$OWNER/$REPO" --body "팀 빌딩 제출 마감 시각이 지났습니다. 사무국에 문의해 주세요."
+      #         gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+      #         gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+      #         exit 1
+      #     fi
+
+      # ----------------------------------------------------------------------
+      # 1. Parse the structured issue form body. The form renders each input as
+      #    `### <label>` followed by the value (or `_No response_`). For the
+      #    members textarea (render: text) the value is wrapped in a fenced
+      #    ```text block. The checkbox section is a list of `- [x]` / `- [ ]`.
+      # ----------------------------------------------------------------------
+      - name: Parse issue body
+        id: parse
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, json, pathlib
+
+          body = os.environ["BODY"].replace("\r\n", "\n")
+
+          def section(heading: str) -> str:
+              # Capture text after "### <heading>" up to the next "### " or EOF.
+              m = re.search(
+                  rf"^###\s+{re.escape(heading)}\s*\n(.*?)(?=^###\s|\Z)",
+                  body, flags=re.S | re.M)
+              return m.group(1).strip() if m else ""
+
+          def fenced_text(s: str) -> str:
+              # The `render: text` textarea is fenced in ```text ... ```.
+              m = re.search(r"```(?:text)?\s*\n?(.*?)```", s, flags=re.S)
+              return (m.group(1) if m else s).strip()
+
+          def required(value: str, label: str) -> str:
+              # GitHub renders an empty input as "_No response_". Treat both that
+              # and a literally missing/empty section as "user didn't fill it in".
+              if not value or value.lower() == "_no response_":
+                  raise SystemExit(f"Required field missing: {label}")
+              return value
+
+          team_name = required(section("팀 이름"),  "팀 이름")
+          leader    = required(section("팀 리더"), "팀 리더")
+          members_raw = fenced_text(section("팀 멤버 (선택 사항)"))
+          acks_block  = section("아래 내용을 확인한 후 체크하세요")
+
+          # Members: one handle per line, skip blanks / "_No response_".
+          # Covers all the empty shapes GitHub emits for an optional textarea:
+          #   - section omitted entirely → section() returns ""
+          #   - left blank → "_No response_" (no fence, caught by the equality check)
+          #   - empty fence → fenced_text() strips to ""
+          #   - "_No response_" sneaks in as a line → filtered by the startswith("_") guard
+          members = []
+          if members_raw and members_raw.lower() != "_no response_":
+              for line in members_raw.splitlines():
+                  h = line.strip().lstrip("@")
+                  if h and not h.startswith("_"):
+                      members.append(h)
+
+          # Acknowledgements: count ticked vs unticked boxes.
+          ticked   = len(re.findall(r"^\s*-\s*\[[xX]\]", acks_block, flags=re.M))
+          unticked = len(re.findall(r"^\s*-\s*\[ \]",   acks_block, flags=re.M))
+          acks_ok  = (unticked == 0) and (ticked >= 2)
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a", encoding="utf-8") as f:
+              f.write(f"team_name={team_name}\n")
+              f.write(f"leader={leader.lstrip('@')}\n")
+              f.write(f"members={json.dumps(members)}\n")
+              f.write(f"acks_ok={'true' if acks_ok else 'false'}\n")
+
+          print(f"team_name={team_name!r}")
+          print(f"leader={leader!r}")
+          print(f"members={members}")
+          print(f"acks_ticked={ticked} acks_unticked={unticked} acks_ok={acks_ok}")
+          PY
+
+      # ----------------------------------------------------------------------
+      # 2. Validate: leader must equal the issue author. Case-insensitive
+      #    because GitHub handles are case-insensitive.
+      # ----------------------------------------------------------------------
+      - name: Validate leader matches issue author
+        id: check_leader
+        run: |
+          leader="${{ steps.parse.outputs.leader }}"
+          author="${AUTHOR}"
+          if [ "${leader,,}" != "${author,,}" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "반드시 팀 리더가 이슈를 생성해야 합니다 (이슈 작성자 \`$author\` ≠ 리더 필드 \`$leader\`)."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 3. Reject if the leader's handle appears in the members list. The form
+      #    says the leader doesn't need to be re-entered; treat re-entry as a
+      #    mistake worth flagging so the leader can resubmit cleanly. Compared
+      #    case-insensitively because GitHub handles are case-insensitive.
+      # ----------------------------------------------------------------------
+      - name: Reject leader in members list
+        run: |
+          leader="${{ steps.parse.outputs.leader }}"
+          members_json='${{ steps.parse.outputs.members }}'
+          # jq's ascii_downcase + IN() does a case-insensitive membership check.
+          if echo "$members_json" | jq -e --arg L "${leader,,}" \
+              '[.[] | ascii_downcase] | any(. == $L)' >/dev/null; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "팀 리더(\`$leader\`)는 팀 멤버 목록에 다시 입력하지 마세요. 리더 항목을 멤버 목록에서 제거한 뒤 다시 제출해 주세요."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 4. Validate every team member's GitHub handle resolves to a real user
+      #    via `gh api /users/<handle>`. Skips the leader (the API author check
+      #    above already proved they exist).
+      # ----------------------------------------------------------------------
+      - name: Validate member handles
+        id: check_members
+        run: |
+          members_json='${{ steps.parse.outputs.members }}'
+          mapfile -t members < <(echo "$members_json" | jq -r '.[]')
+
+          invalid=()
+          for m in "${members[@]}"; do
+              if ! gh api "/users/$m" --silent 2>/dev/null; then
+                  invalid+=("$m")
+              fi
+          done
+
+          if [ ${#invalid[@]} -gt 0 ]; then
+              joined=$(printf "\`%s\` " "${invalid[@]}")
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "팀원 GitHub 핸들이 유효하지 않습니다. 오타를 확인하세요. 유효하지 않은 핸들: ${joined}"
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 5. Validate that every participant (leader + members) has registered
+      #    their GitHub handle via the `GitHub 핸들 등록` issue form. Queries
+      #    GET /api/participants/{handle}: 200 = registered, 404 = not yet
+      #    registered, anything else = API failure (report and abort).
+      # ----------------------------------------------------------------------
+      - name: Validate registered participant handles
+        id: check_registered
+        env:
+          API_ENDPOINT: ${{ secrets.AZURE_API_ENDPOINT }}
+          API_KEY:      ${{ secrets.AZURE_API_KEY }}
+          LEADER:       ${{ steps.parse.outputs.leader }}
+          MEMBERS_JSON: ${{ steps.parse.outputs.members }}
+        run: |
+          base="${API_ENDPOINT%/}"
+          # Combine leader + members into one ordered list, deduped
+          # case-insensitively (the API treats handles case-insensitively).
+          mapfile -t handles < <(jq -r --arg L "$LEADER" \
+              '([$L] + .) | unique_by(ascii_downcase) | .[]' <<<"$MEMBERS_JSON")
+
+          unregistered=()
+          api_errors=()
+          for h in "${handles[@]}"; do
+              encoded=$(jq -rn --arg h "$h" '$h|@uri')
+              code=$(curl -sS -o /dev/null -w "%{http_code}" \
+                  -H "X-API-Key: $API_KEY" \
+                  "$base/api/participants/$encoded")
+              case "$code" in
+                  200) ;;
+                  404) unregistered+=("$h") ;;
+                  *)   api_errors+=("$h (HTTP $code)") ;;
+              esac
+          done
+
+          if [ ${#api_errors[@]} -gt 0 ]; then
+              joined=$(printf '%s, ' "${api_errors[@]}")
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "참가자 등록 여부를 확인하는 중 API 오류가 발생했습니다. 잠시 후에 다시 시도하거나 사무국에 문의하세요: ${joined%, }"
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+          if [ ${#unregistered[@]} -gt 0 ]; then
+              joined=$(printf '`%s` ' "${unregistered[@]}")
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "다음 GitHub 핸들이 참가자로 등록되어 있지 않습니다. 먼저 \`GitHub 핸들 등록\` 이슈 양식으로 핸들을 등록한 뒤 다시 제출해 주세요: ${joined}"
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 5b. Reject if the leader is already on another team's member roster.
+      #     Team-building requires that each participant belongs to exactly one
+      #     team, so someone already registered as a *member* of an existing
+      #     team must not register a new team as its leader. Queries
+      #     GET /api/teams?member={handle}: 404 = not on any roster (ok),
+      #     200 = already a member (reject), anything else = API failure.
+      # ----------------------------------------------------------------------
+      - name: Reject leader already in a team
+        env:
+          API_ENDPOINT: ${{ secrets.AZURE_API_ENDPOINT }}
+          API_KEY:      ${{ secrets.AZURE_API_KEY }}
+          LEADER:       ${{ steps.parse.outputs.leader }}
+        run: |
+          base="${API_ENDPOINT%/}"
+          encoded=$(jq -rn --arg h "$LEADER" '$h|@uri')
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -H "X-API-Key: $API_KEY" \
+              "$base/api/teams?member=$encoded")
+          echo "Membership check for '$LEADER': HTTP $code"
+          case "$code" in
+              404) ;;  # Not a member of any team → allowed to lead.
+              200)
+                  gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                      --body "이미 다른 팀의 팀원으로 등록되어 있어 팀 리더로 등록할 수 없습니다. 한 사람은 하나의 팀에만 속할 수 있습니다."
+                  gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+                  gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+                  exit 1
+                  ;;
+              *)
+                  gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                      --body "팀원 중복 여부를 확인하는 중 API 오류가 발생했습니다 (HTTP \`$code\`). 잠시 후에 다시 시도하거나 사무국에 문의하세요."
+                  gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+                  gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+                  exit 1
+                  ;;
+          esac
+
+      # ----------------------------------------------------------------------
+      # 6. Validate both acknowledgement checkboxes are ticked.
+      # ----------------------------------------------------------------------
+      - name: Validate acknowledgements
+        run: |
+          if [ "${{ steps.parse.outputs.acks_ok }}" != "true" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "모든 확인 사항 체크박스를 체크해야 합니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 7. Build the JSON payload that matches TeamRequest (Leaderboard.Models).
+      # ----------------------------------------------------------------------
+      - name: Build API payload
+        id: payload
+        run: |
+          payload=$(jq -nc \
+              --arg name   "${{ steps.parse.outputs.team_name }}" \
+              --arg leader "${{ steps.parse.outputs.leader }}" \
+              --argjson members '${{ steps.parse.outputs.members }}' \
+              '{name: $name, leader: $leader, members: $members}')
+          echo "payload=$payload" >> "$GITHUB_OUTPUT"
+          echo "Payload: $payload"
+
+      # ----------------------------------------------------------------------
+      # 8. POST /api/teams. The API key + X-GitHub-Actor header authenticate
+      #    the request; the actor must equal the body.leader (validated in
+      #    step 2). Response codes per openapi.json:
+      #      201 Created · 200 Updated · 400 bad request · 403 actor mismatch
+      #      · 409 name conflict
+      # ----------------------------------------------------------------------
+      - name: Call team registration API
+        id: api
+        env:
+          API_ENDPOINT: ${{ secrets.AZURE_API_ENDPOINT }}
+          API_KEY:      ${{ secrets.AZURE_API_KEY }}
+          PAYLOAD:      ${{ steps.payload.outputs.payload }}
+        run: |
+          # Strip trailing slash so URL composition is consistent regardless of
+          # how the secret was set.
+          base="${API_ENDPOINT%/}"
+          response=$(mktemp)
+          http_code=$(curl -sS -o "$response" -w "%{http_code}" \
+              -X POST "$base/api/teams" \
+              -H "Content-Type: application/json" \
+              -H "X-API-Key: $API_KEY" \
+              -H "X-GitHub-Actor: ${{ steps.parse.outputs.leader }}" \
+              --data "$PAYLOAD")
+
+          echo "HTTP $http_code"
+          body=$(cat "$response")
+          echo "Body: $body"
+
+          {
+            printf 'http_code=%s\n' "$http_code"
+            printf 'body<<RESPONSE_EOF\n'
+            cat "$response"
+            printf '\nRESPONSE_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------------
+      # 9. Branch on the response: 200/201 → success, anything else → error
+      #    comment with the API's `message` field (per ErrorResponse in
+      #    openapi.json). Both branches close the issue.
+      # ----------------------------------------------------------------------
+      - name: Report success
+        if: steps.api.outputs.http_code == '200' || steps.api.outputs.http_code == '201'
+        run: |
+          gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+              --body "팀 등록을 완료했습니다."
+          gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "complete"
+          gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+
+      - name: Report API error
+        if: steps.api.outputs.http_code != '200' && steps.api.outputs.http_code != '201'
+        env:
+          BODY: ${{ steps.api.outputs.body }}
+          CODE: ${{ steps.api.outputs.http_code }}
+        run: |
+          message=$(echo "$BODY" | jq -r '.message // empty' 2>/dev/null || true)
+          if [ -z "$message" ]; then
+              message="$BODY"
+          fi
+          gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+              --body "팀 등록에 실패했습니다 (HTTP \`$CODE\`). 잠시 후에 다시 시도하거나 사무국에 문의하세요.: $message"
+          gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+          gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+          exit 1

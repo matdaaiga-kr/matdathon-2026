@@ -1,0 +1,58 @@
+name: 🏷️ 팀 빌딩
+description: 팀을 등록하거나 업데이트합니다.
+title: "[team] <팀 이름>"
+labels: ["team-building"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 맞다톤 — 팀 등록
+
+        - 팀 등록 마감 시각은 따로 없습니다. 다만, 결과 제출 전에 반드시 팀을 등록해야 합니다.
+        - 팀 리더가 직접 이슈를 작성해야 합니다.
+        - 동일한 리더 핸들로 다시 제출하면 기존 등록했던 팀 빌딩 내용을 **업데이트**합니다 (팀 이름 변경 또는 멤버 교체). 중복 생성은 되지 않습니다.
+        - 팀 이름은 대소문자를 구분하지 않고 고유해야 합니다. 다른 팀이 이미 선택한 이름을 사용 중인 경우, 다른 이름으로 새로 이슈를 생성해야 합니다.
+
+  - type: input
+    id: name
+    attributes:
+      label: 팀 이름
+      description: 전광판에 보이는 공개적이고 고유한 이름입니다 (대소문자 구분 없음).
+      placeholder: Team Hubber
+    validations:
+      required: true
+
+  - type: input
+    id: leader
+    attributes:
+      label: 팀 리더
+      description: 팀 리더의 GitHub 핸들입니다. `@` 없이 입력하세요. 팀 리더는 이슈 작성자와 일치해야 합니다.
+      placeholder: leader
+    validations:
+      required: true
+
+  - type: textarea
+    id: members
+    attributes:
+      label: 팀 멤버 (선택 사항)
+      description: |
+        - 팀원의 GitHub 핸들, **한 줄에 하나씩**, `@` 없이 입력합니다.
+        - 팀 리더는 다시 입력할 필요가 없습니다.
+        - 단독 참가인 경우 입력하지 않아도 됩니다.
+        - 멤버 정보는 메타데이터로만 저장하며, 전광판에는 나타나지 않습니다.
+      placeholder: |
+        mona
+        hubot
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: 아래 내용을 확인한 후 체크하세요
+      options:
+        - label: 나는 팀 리더이며, 내 GitHub 계정으로 이 이슈를 열고 있습니다.
+          required: true
+        - label: 이 양식을 다시 제출하면 새 팀을 생성하는 대신, 기존 등록한 팀 정보를 업데이트한다는 것을 이해했습니다.
+          required: true

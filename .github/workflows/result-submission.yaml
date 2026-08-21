@@ -1,0 +1,376 @@
+name: Result Submission
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  submit:
+    # Only run for issues that carry the submission label (set by the issue form).
+    if: contains(github.event.issue.labels.*.name, 'submission')
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.event.repository.name }}
+      ISSUE: ${{ github.event.issue.number }}
+      AUTHOR: ${{ github.event.issue.user.login }}
+      BODY: ${{ github.event.issue.body }}
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # ----------------------------------------------------------------------
+      # 0. Reject overdue submissions. The deadline lives in the repo-level
+      #    Actions variable `DUE_RESULT_SUBMISSION` (ISO-8601 with offset, e.g.
+      #    `2026-06-20T13:00:00.000+09:00`). Compared against the issue's
+      #    `created_at` so re-runs share the same verdict.
+      # ----------------------------------------------------------------------
+      - name: Check submission is on time
+        env:
+          DUE: ${{ vars.DUE_RESULT_SUBMISSION }}
+          CREATED_AT: ${{ github.event.issue.created_at }}
+        run: |
+          status=$(python3 - <<'PY'
+          import os, sys
+          from datetime import datetime
+
+          due_raw = os.environ.get("DUE", "").strip()
+          created_raw = os.environ.get("CREATED_AT", "").strip()
+
+          if not due_raw:
+              # No due date configured → don't block.
+              print("ok")
+              sys.exit(0)
+
+          def parse(ts: str):
+              # GitHub's created_at uses trailing Z; fromisoformat needs +00:00 on <3.11.
+              if ts.endswith("Z"):
+                  ts = ts[:-1] + "+00:00"
+              return datetime.fromisoformat(ts)
+
+          print("overdue" if parse(created_raw) > parse(due_raw) else "ok")
+          PY
+          )
+
+          echo "Status: $status (due=$DUE, created=$CREATED_AT)"
+
+          if [ "$status" = "overdue" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" --body "결과물 제출 마감 시각이 지났습니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 1. Parse the structured issue form body.
+      # ----------------------------------------------------------------------
+      - name: Parse issue body
+        id: parse
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, json, pathlib
+
+          body = os.environ["BODY"].replace("\r\n", "\n")
+
+          def section(heading: str) -> str:
+              m = re.search(
+                  rf"^###\s+{re.escape(heading)}\s*\n(.*?)(?=^###\s|\Z)",
+                  body, flags=re.S | re.M)
+              return m.group(1).strip() if m else ""
+
+          def required(value: str, label: str) -> str:
+              if not value or value.lower() == "_no response_":
+                  raise SystemExit(f"Required field missing: {label}")
+              return value
+
+          app_title      = required(section("앱 제목"),       "앱 제목")
+          repository_url = required(section("리포지토리 URL"), "리포지토리 URL")
+          commit_hash    = required(section("커밋 해시"),     "커밋 해시").lower()
+          deployment_url = required(section("배포 URL"),      "배포 URL")
+          app_details    = section("앱 세부 정보 (선택 사항)")
+          if app_details.lower() == "_no response_":
+              app_details = ""
+          acks_block     = section("확인 사항")
+
+          # Count acknowledgement boxes. Template has 3 required checkboxes.
+          ticked   = len(re.findall(r"^\s*-\s*\[[xX]\]", acks_block, flags=re.M))
+          unticked = len(re.findall(r"^\s*-\s*\[ \]",   acks_block, flags=re.M))
+          acks_ok  = (unticked == 0) and (ticked >= 3)
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a", encoding="utf-8") as f:
+              f.write(f"app_title={app_title}\n")
+              f.write(f"repository_url={repository_url}\n")
+              f.write(f"commit_hash={commit_hash}\n")
+              f.write(f"deployment_url={deployment_url}\n")
+              # app_details may contain newlines → heredoc form for the output.
+              f.write("app_details<<APP_DETAILS_EOF\n")
+              f.write(app_details)
+              f.write("\nAPP_DETAILS_EOF\n")
+              f.write(f"acks_ok={'true' if acks_ok else 'false'}\n")
+
+          print(f"app_title={app_title!r}")
+          print(f"repository_url={repository_url!r}")
+          print(f"commit_hash={commit_hash!r}")
+          print(f"deployment_url={deployment_url!r}")
+          print(f"acks_ticked={ticked} acks_unticked={unticked} acks_ok={acks_ok}")
+          PY
+
+      # ----------------------------------------------------------------------
+      # 2. Author must be a registered team leader. Look them up via
+      #    GET /api/teams?leader=<author>. 404 → not registered; anything other
+      #    than 200/404 → API problem (re-surfaced as a generic error later).
+      # ----------------------------------------------------------------------
+      - name: Verify author is a registered team leader
+        id: lookup_team
+        env:
+          API_ENDPOINT: ${{ secrets.AZURE_API_ENDPOINT }}
+          API_KEY:      ${{ secrets.AZURE_API_KEY }}
+        run: |
+          base="${API_ENDPOINT%/}"
+          response=$(mktemp)
+          http_code=$(curl -sS -o "$response" -w "%{http_code}" \
+              -G "$base/api/teams" \
+              --data-urlencode "leader=$AUTHOR" \
+              -H "X-API-Key: $API_KEY")
+
+          echo "HTTP $http_code"
+          echo "Body: $(cat "$response")"
+
+          if [ "$http_code" = "404" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "이슈 작성자가 리더인 팀을 찾을 수 없거나 존재하지 않습니다. 먼저 팀 빌딩 이슈 양식을 통해 팀을 등록하세요."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+          if [ "$http_code" != "200" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "이슈 작성자가 리더로 있는 팀의 등록 여부를 확인할 수 없습니다 (HTTP \`$http_code\`). 잠시 후에 다시 시도하거나 사무국에 문의하세요."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 3. Repository URL must live under the leader's own account
+      #    (https://github.com/<leader>/<repo>). Strict per the locked spec —
+      #    org-owned repos are rejected and teams should fork to the leader.
+      # ----------------------------------------------------------------------
+      - name: Validate repository URL belongs to the leader
+        run: |
+          repo_url="${{ steps.parse.outputs.repository_url }}"
+          # Lowercase for the prefix match so case differences (e.g. Alice vs alice) don't fail.
+          prefix="https://github.com/${AUTHOR,,}/"
+          if [[ "${repo_url,,}" != "$prefix"* ]]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "유효하지 않은 저장소입니다. 저장소 URL은 반드시 \`https://github.com/$AUTHOR/\` (으)로 시작해야 합니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 4. Commit hash must exist on that repository. `gh api /repos/.../commits/<sha>`
+      #    returns 200 if the SHA resolves (full or short), 422 if not.
+      # ----------------------------------------------------------------------
+      - name: Validate commit hash exists in the repository
+        run: |
+          repo_url="${{ steps.parse.outputs.repository_url }}"
+          commit_hash="${{ steps.parse.outputs.commit_hash }}"
+
+          # Extract owner/repo from the URL. Tolerates an optional trailing slash and `.git`.
+          path=$(echo "$repo_url" | sed -E 's|^https?://github\.com/||; s|/$||; s|\.git$||')
+          owner_repo=$(echo "$path" | cut -d'/' -f1,2)
+
+          if ! gh api "/repos/$owner_repo/commits/$commit_hash" --silent 2>/dev/null; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "유효하지 않은 커밋 해시입니다. 커밋 \`$commit_hash\`를 \`$owner_repo\`에서 찾을 수 없습니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 5. Both mandatory judging documents must exist as files at the submitted
+      #    commit. README.md is optional secondary evidence and is not checked.
+      # ----------------------------------------------------------------------
+      - name: Validate required judging documents
+        run: |
+          repo_url="${{ steps.parse.outputs.repository_url }}"
+          commit_hash="${{ steps.parse.outputs.commit_hash }}"
+          path=$(echo "$repo_url" | sed -E 's|^https?://github\.com/||; s|/$||; s|\.git$||')
+          owner_repo=$(echo "$path" | cut -d'/' -f1,2)
+          missing=()
+
+          for document in PRD.md TRD.md; do
+              if ! document_type=$(gh api \
+                  --method GET \
+                  "/repos/$owner_repo/contents/$document" \
+                  -f "ref=$commit_hash" \
+                  --jq '.type' 2>/dev/null) || [ "$document_type" != "file" ]; then
+                  missing+=("$document")
+              fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+              missing_list=$(printf '%s, ' "${missing[@]}")
+              missing_list="${missing_list%, }"
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "제출 커밋 \`$commit_hash\`의 저장소 루트에 필수 심사 문서 \`PRD.md\`와 \`TRD.md\`가 모두 파일로 있어야 합니다. 누락되었거나 읽을 수 없는 문서: \`$missing_list\`."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 6. Deployment URL hostname must match a known Azure pattern. Hostname
+      #    substring check only — custom-domain CNAMEs are not recognised
+      #    here, so contestants must submit the raw Azure URL.
+      # ----------------------------------------------------------------------
+      - name: Validate deployment URL is on Azure
+        run: |
+          deployment_url="${{ steps.parse.outputs.deployment_url }}"
+          # Extract the hostname (between :// and the next / or :).
+          host=$(echo "$deployment_url" | sed -E 's|^https?://||; s|/.*||; s|:.*||' | tr '[:upper:]' '[:lower:]')
+
+          azure_match=false
+          for suffix in \
+              azurewebsites.net \
+              azurecontainerapps.io \
+              azurestaticapps.net \
+              azurefd.net \
+              azureedge.net \
+              cloudapp.azure.com \
+              azure.com \
+              azure.ms; do
+              if [[ "$host" == *".$suffix" || "$host" == "$suffix" ]]; then
+                  azure_match=true
+                  break
+              fi
+          done
+
+          if [ "$azure_match" != "true" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "반드시 Azure 플랫폼을 통해 앱을 배포해야 합니다. 호스트 \`$host\`는 알려진 Azure 호스트 이름이 아닙니다 (\`*.azurewebsites.net\`, \`*.azurecontainerapps.io\`, \`*.azurestaticapps.net\` 등). 커스텀 도메인은 사용하지 않습니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 7. All three acknowledgement checkboxes must be ticked.
+      # ----------------------------------------------------------------------
+      - name: Validate acknowledgements
+        run: |
+          if [ "${{ steps.parse.outputs.acks_ok }}" != "true" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "모든 확인 사항 체크박스를 체크해야 합니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 8. Build the JSON payload that matches SubmissionRequest (Leaderboard.Models).
+      #    submittedAt is injected by the workflow (not the user); use the issue's
+      #    createdAt timestamp so re-runs of the same issue all share one value.
+      # ----------------------------------------------------------------------
+      - name: Build API payload
+        id: payload
+        env:
+          APP_DETAILS: ${{ steps.parse.outputs.app_details }}
+          CREATED_AT:  ${{ github.event.issue.created_at }}
+        run: |
+          # Convert empty appDetails → JSON null; jq's `// null` short-circuit.
+          if [ -z "$APP_DETAILS" ]; then
+              details_arg=(--argjson appDetails null)
+          else
+              details_arg=(--arg appDetails "$APP_DETAILS")
+          fi
+
+          payload=$(jq -nc \
+              --arg appTitle      "${{ steps.parse.outputs.app_title }}" \
+              --arg repositoryUrl "${{ steps.parse.outputs.repository_url }}" \
+              --arg commitHash    "${{ steps.parse.outputs.commit_hash }}" \
+              --arg deploymentUrl "${{ steps.parse.outputs.deployment_url }}" \
+              "${details_arg[@]}" \
+              --arg submittedAt   "$CREATED_AT" \
+              '{appTitle: $appTitle, repositoryUrl: $repositoryUrl, commitHash: $commitHash,
+                deploymentUrl: $deploymentUrl, appDetails: $appDetails, submittedAt: $submittedAt}')
+          echo "payload=$payload" >> "$GITHUB_OUTPUT"
+          echo "Payload: $payload"
+
+      # ----------------------------------------------------------------------
+      # 8. POST /api/submissions. The X-GitHub-Actor header authenticates the
+      #    actor; the API resolves the owning team from it (PRD §7) and
+      #    allocates the next per-team attempt atomically. Response per openapi:
+      #      201 Created · 400 bad request · 401 unauthorized · 403 no team
+      # ----------------------------------------------------------------------
+      - name: Call submission API
+        id: api
+        env:
+          API_ENDPOINT: ${{ secrets.AZURE_API_ENDPOINT }}
+          API_KEY:      ${{ secrets.AZURE_API_KEY }}
+          PAYLOAD:      ${{ steps.payload.outputs.payload }}
+        run: |
+          base="${API_ENDPOINT%/}"
+          response=$(mktemp)
+          http_code=$(curl -sS -o "$response" -w "%{http_code}" \
+              -X POST "$base/api/submissions" \
+              -H "Content-Type: application/json" \
+              -H "X-API-Key: $API_KEY" \
+              -H "X-GitHub-Actor: $AUTHOR" \
+              --data "$PAYLOAD")
+
+          echo "HTTP $http_code"
+          body=$(cat "$response")
+          echo "Body: $body"
+
+          {
+            printf 'http_code=%s\n' "$http_code"
+            printf 'body<<RESPONSE_EOF\n'
+            cat "$response"
+            printf '\nRESPONSE_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------------
+      # 9. Branch on the response: 201 → success, anything else → error
+      #    comment with the API's `message` field. Both branches close.
+      # ----------------------------------------------------------------------
+      - name: Report success
+        if: steps.api.outputs.http_code == '201'
+        run: |
+          gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+              --body "결과를 성공적으로 제출했습니다. 맞다톤 전광판을 확인하세요: https://matdaaiga.kr/matdathon/leaderboard"
+          gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "complete"
+          gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+
+      - name: Report API error
+        if: steps.api.outputs.http_code != '201'
+        env:
+          BODY: ${{ steps.api.outputs.body }}
+          CODE: ${{ steps.api.outputs.http_code }}
+        run: |
+          message=$(echo "$BODY" | jq -r '.message // empty' 2>/dev/null || true)
+          if [ -z "$message" ]; then
+              message="$BODY"
+          fi
+          gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+              --body "결과 제출에 실패했습니다 (HTTP \`$CODE\`). 잠시 후에 다시 시도하거나 사무국에 문의하세요.: $message"
+          gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+          gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+          exit 1

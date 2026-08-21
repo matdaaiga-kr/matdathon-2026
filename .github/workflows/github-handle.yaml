@@ -1,0 +1,223 @@
+name: GitHub Handle Registration
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  register:
+    # Only run for issues that carry the github-handle label (set by the issue form).
+    if: contains(github.event.issue.labels.*.name, 'github-handle')
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.event.repository.name }}
+      ISSUE: ${{ github.event.issue.number }}
+      AUTHOR: ${{ github.event.issue.user.login }}
+      BODY: ${{ github.event.issue.body }}
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # ----------------------------------------------------------------------
+      # 1. Author must be on the staff list. `STAFF_MEMBERS` is a single secret
+      #    holding a comma-delimited list of GitHub handles; compared
+      #    case-insensitively because GitHub handles are case-insensitive.
+      #    The form is filed by event staff for someone else, so the author is
+      #    a staff member (NOT necessarily the registered handle).
+      # ----------------------------------------------------------------------
+      - name: Validate issue author is staff
+        env:
+          STAFF_MEMBERS: ${{ secrets.STAFF_MEMBERS }}
+        run: |
+          ok="false"
+          author_lc="${AUTHOR,,}"
+          IFS=',' read -ra staff <<< "$STAFF_MEMBERS"
+          for s in "${staff[@]}"; do
+              # Trim whitespace and a leading '@' just in case the secret was
+              # set with either; then case-insensitive compare.
+              h="${s#"${s%%[![:space:]]*}"}"    # ltrim
+              h="${h%"${h##*[![:space:]]}"}"    # rtrim
+              h="${h#@}"
+              if [ "${h,,}" = "$author_lc" ]; then
+                  ok="true"
+                  break
+              fi
+          done
+
+          if [ "$ok" != "true" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "인가 받은 이슈 작성자가 아닙니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 2. Parse the structured issue form body. The form renders the single
+      #    input as `### GitHub 핸들` followed by the value (or `_No response_`).
+      #    Two checkbox sections follow, each a list of `- [x]` / `- [ ]` items:
+      #      · `### GitHub Copilot Max 라이센스 발급 여부` — optional opt-out box.
+      #      · `### 아래 내용을 확인한 후 체크하세요`          — 2 required acks.
+      # ----------------------------------------------------------------------
+      - name: Parse issue body
+        id: parse
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, pathlib
+
+          body = os.environ["BODY"].replace("\r\n", "\n")
+
+          def section(heading: str) -> str:
+              # Capture text after "### <heading>" up to the next "### " or EOF.
+              m = re.search(
+                  rf"^###\s+{re.escape(heading)}\s*\n(.*?)(?=^###\s|\Z)",
+                  body, flags=re.S | re.M)
+              return m.group(1).strip() if m else ""
+
+          def required(value: str, label: str) -> str:
+              # GitHub renders an empty input as "_No response_". Treat both that
+              # and a literally missing/empty section as "user didn't fill it in".
+              if not value or value.lower() == "_no response_":
+                  raise SystemExit(f"Required field missing: {label}")
+              return value
+
+          handle = required(section("GitHub 핸들"), "GitHub 핸들").lstrip("@").strip()
+
+          # Acknowledgements: count ticked vs unticked boxes. The form has 2
+          # required boxes; both must be ticked. This block lives under its own
+          # heading ("아래 내용을 확인한 후 체크하세요"), distinct from the
+          # opt-out section below.
+          acks_block = section("아래 내용을 확인한 후 체크하세요")
+          ticked   = len(re.findall(r"^\s*-\s*\[[xX]\]", acks_block, flags=re.M))
+          unticked = len(re.findall(r"^\s*-\s*\[ \]",   acks_block, flags=re.M))
+          acks_ok  = (unticked == 0) and (ticked >= 2)
+
+          # Opt-out: an optional, single checkbox in its own section. When the
+          # participant ticks it they decline the GitHub Copilot Max license, so
+          # we still register them but skip the license promise downstream.
+          optout_block = section("GitHub Copilot Max 라이센스 발급 여부")
+          optout = bool(re.search(r"^\s*-\s*\[[xX]\]", optout_block, flags=re.M))
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a", encoding="utf-8") as f:
+              f.write(f"handle={handle}\n")
+              f.write(f"acks_ok={'true' if acks_ok else 'false'}\n")
+              f.write(f"optout={'true' if optout else 'false'}\n")
+
+          print(f"handle={handle!r}")
+          print(f"acks_ticked={ticked} acks_unticked={unticked} acks_ok={acks_ok}")
+          print(f"optout={optout}")
+          PY
+
+      # ----------------------------------------------------------------------
+      # 3. Verify the handle resolves to a real GitHub user via
+      #    `gh api /users/<handle>`. Catches typos before we call our API.
+      # ----------------------------------------------------------------------
+      - name: Verify GitHub handle exists
+        run: |
+          handle="${{ steps.parse.outputs.handle }}"
+          if ! gh api "/users/$handle" --silent 2>/dev/null; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "유효한 GitHub 핸들이 아니거나 오타가 있습니다. 다시 한 번 확인하세요."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 4. Validate both acknowledgement checkboxes are ticked. The issue form
+      #    marks them `required: true`, but that only blocks the web UI — a
+      #    direct API issue creation can still bypass it, so re-check here.
+      # ----------------------------------------------------------------------
+      - name: Validate acknowledgements
+        run: |
+          if [ "${{ steps.parse.outputs.acks_ok }}" != "true" ]; then
+              gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+                  --body "모든 확인 사항 체크박스를 체크해야 합니다."
+              gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+              gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+              exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # 5. Build the JSON payload that matches ParticipantHandleRequest
+      #    (Leaderboard.Models). `noGhcpMax` (boolean) carries the participant's
+      #    Copilot Max license opt-out.
+      # ----------------------------------------------------------------------
+      - name: Build API payload
+        id: payload
+        env:
+          HANDLE: ${{ steps.parse.outputs.handle }}
+          OPTOUT: ${{ steps.parse.outputs.optout }}
+        run: |
+          payload=$(jq -nc \
+              --arg handle "$HANDLE" \
+              --argjson optout "$OPTOUT" \
+              '{handle: $handle, noGhcpMax: $optout}')
+          echo "payload=$payload" >> "$GITHUB_OUTPUT"
+          echo "Payload: $payload"
+
+      # ----------------------------------------------------------------------
+      # 6. POST /api/participants. Upsert keyed by handle; the staff author is
+      #    recorded as `registered_by` (audit only — actor==handle is NOT
+      #    required). Response codes per openapi.json:
+      #      201 Created · 200 Updated · 400 bad request · 401 unauthorized
+      # ----------------------------------------------------------------------
+      - name: Call participant registration API
+        id: api
+        env:
+          API_ENDPOINT: ${{ secrets.AZURE_API_ENDPOINT }}
+          API_KEY:      ${{ secrets.AZURE_API_KEY }}
+          PAYLOAD:      ${{ steps.payload.outputs.payload }}
+        run: |
+          # Strip trailing slash so URL composition is consistent regardless of
+          # how the secret was set.
+          base="${API_ENDPOINT%/}"
+          response=$(mktemp)
+          http_code=$(curl -sS -o "$response" -w "%{http_code}" \
+              -X POST "$base/api/participants" \
+              -H "Content-Type: application/json" \
+              -H "X-API-Key: $API_KEY" \
+              -H "X-GitHub-Actor: $AUTHOR" \
+              --data "$PAYLOAD")
+
+          echo "HTTP $http_code"
+          echo "Body: $(cat "$response")"
+
+          {
+            printf 'http_code=%s\n' "$http_code"
+          } >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------------
+      # 7. Branch on the response: 200/201 → success, anything else → error.
+      #    Both branches comment and close the issue.
+      # ----------------------------------------------------------------------
+      - name: Report success
+        if: steps.api.outputs.http_code == '200' || steps.api.outputs.http_code == '201'
+        run: |
+          gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+              --body "성공적으로 GitHub 핸들을 등록했습니다. 곧 GitHub Copilot 라이센스를 부여할 예정이니 GitHub 핸들에 연결된 이메일을 스팸메일함까지 확인해 보세요."
+          gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "complete"
+          gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+
+      - name: Report API error
+        if: steps.api.outputs.http_code != '200' && steps.api.outputs.http_code != '201'
+        run: |
+          gh issue comment "$ISSUE" --repo "$OWNER/$REPO" \
+              --body "등록하는 과정에서 문제가 발생했습니다. 나중에 다시 시도하거나 사무국에 문의하세요"
+          gh issue edit "$ISSUE" --repo "$OWNER/$REPO" --add-label "invalid"
+          gh issue close "$ISSUE" --repo "$OWNER/$REPO"
+          exit 1

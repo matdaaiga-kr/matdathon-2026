@@ -1,0 +1,3 @@
+# Force users into one of the two structured forms below; no blank issues.
+# (Bug reports, feature requests, etc. are out of scope for the contest repo.)
+blank_issues_enabled: false
