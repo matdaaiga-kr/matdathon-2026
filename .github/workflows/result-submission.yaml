@@ -104,10 +104,10 @@ jobs:
               app_details = ""
           acks_block     = section("확인 사항")
 
-          # Count acknowledgement boxes. Template has 3 required checkboxes.
+          # Count acknowledgement boxes. Template has 4 required checkboxes.
           ticked   = len(re.findall(r"^\s*-\s*\[[xX]\]", acks_block, flags=re.M))
           unticked = len(re.findall(r"^\s*-\s*\[ \]",   acks_block, flags=re.M))
-          acks_ok  = (unticked == 0) and (ticked >= 3)
+          acks_ok  = (unticked == 0) and (ticked >= 4)
 
           out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
           with out.open("a", encoding="utf-8") as f:
@@ -272,7 +272,7 @@ jobs:
           fi
 
       # ----------------------------------------------------------------------
-      # 7. All three acknowledgement checkboxes must be ticked.
+      # 7. All four acknowledgement checkboxes must be ticked.
       # ----------------------------------------------------------------------
       - name: Validate acknowledgements
         run: |

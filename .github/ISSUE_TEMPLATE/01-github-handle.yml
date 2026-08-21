@@ -29,7 +29,7 @@ body:
       description: 체크인한 참가자의 GitHub 핸들입니다. `@` 없이 입력하세요.
       placeholder: mona
     validations:
-      rsssaaaafadfafdadfaaaaaaaaired: true
+      required: true
 
   - type: checkboxes
     id: ghcp-max-optout

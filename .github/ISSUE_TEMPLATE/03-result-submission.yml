@@ -82,3 +82,5 @@ body:
           required: true
         - label: 결과 제출은 최대 2회까지 가능하며, 가장 나중에 제출한 이슈를 기준으로 평가를 수행한다는 것을 이해했습니다.
           required: true
+        - label: 제출한 결과는 AI 에이전트가 심사한다는 것을 이해했고, 심사 결과에 승복합니다.
+          required: true
