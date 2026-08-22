@@ -73,4 +73,17 @@ Discussions 보드의 [행사 참가를 위해 꼭 알고 있어야 할 내용�
 
 ## 입상자 명단
 
-**해커톤 종료후 게시**
+> [!INFO]
+> 입상자의 코드 샘플을 [맞다AI가 조직](https://github.com/matdaaiga-kr)으로 포크한 후 아카이빙 처리했습니다.
+
+### 1등: 크크 | 한끼픽 | [https://github.com/matdaaiga-kr/hankkipick](https://github.com/matdaaiga-kr/hankkipick)
+
+![1등: 크크 | 한끼픽](./results/1-prize-winner.jpg)
+
+### 2등: NDD | Chore Forge | [https://github.com/matdaaiga-kr/chore-forge](https://github.com/matdaaiga-kr/chore-forge)
+
+![2등: NDD | Chore Forge](./results/2-prize-winner.jpg)
+
+### 3등: Aforia | PAGO | [https://github.com/matdaaiga-kr/pago](https://github.com/matdaaiga-kr/pago)
+
+![3등: Aforia | PAGO](./results/3-prize-winner.jpg)
